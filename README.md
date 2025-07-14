@@ -66,7 +66,7 @@ npm run dev
 ```bash
 cd backend
 pip install -r requirements.txt
-python main_unified.py
+uvicorn main:app --reload
 ```
 
 ### Environment Configuration
@@ -101,7 +101,7 @@ unified-scraper/
 ## Usage
 
 ### DuckDuckGo Scraper
-1. Navigate to `/duckduckgo`
+1. Navigate to `/ddg`
 2. Enter search parameters (normal query, exact phrase, etc.)
 3. Configure advanced options (file types, site filters, date ranges)
 4. Click "Search DuckDuckGo" to start scraping
@@ -109,7 +109,7 @@ unified-scraper/
 6. Export data as CSV or Excel
 
 ### X (Twitter) Scraper
-1. Navigate to `/twitter`
+1. Navigate to `/X`
 2. Enter your Twitter credentials
 3. Choose scraping mode (timeline, latest, popular)
 4. Configure search parameters or username
@@ -121,11 +121,11 @@ unified-scraper/
 ## API Endpoints
 
 ### DuckDuckGo
-- `POST /duckduckgo/search` - Advanced DuckDuckGo search
+- `POST /ddg/search` - Advanced DuckDuckGo search
 
 ### Twitter
-- `POST /twitter/timeline` - Get user timeline
-- `POST /twitter/search` - Search tweets
+- `POST /X/timeline` - Get user timeline
+- `POST /X/search` - Search tweets
 
 ### Health
 - `GET /` - API status
@@ -164,7 +164,7 @@ npm run dev
 
 # Terminal 2 - Backend
 cd backend
-python main_unified.py
+uvicorn main:app --reload
 ```
 
 ### Building for Production
@@ -177,7 +177,7 @@ npm start
 # Backend
 cd backend
 pip install -r requirements.txt
-python main_unified.py
+uvicorn main:app --reload
 ```
 
 ## Contributing
