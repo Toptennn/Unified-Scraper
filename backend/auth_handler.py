@@ -4,7 +4,6 @@ import sys
 import io
 from contextlib import redirect_stdout, redirect_stderr
 from typing import Optional, Dict, Any, Callable
-from unittest.mock import patch
 
 from twikit import Client
 from config import TwitterConfig, RateLimitConfig, TwitterCredentials
@@ -114,58 +113,60 @@ class InteractiveAuthHandler:
             # Another challenge might be needed
             pass
     
-    async def _login_with_input_interception(self, session_id: str, client: Client, 
+    async def _login_with_input_interception(self, session_id: str, client: Client,
                                            auth_id: str, password: str, cookies_file: str) -> None:
         """Login with input() call interception to catch verification prompts."""
-        
+
+        # Buffer to capture stdout/stderr from twikit
+        captured = io.StringIO()
+
         # Mock input function to intercept verification prompts
-        original_input = __builtins__['input'] if isinstance(__builtins__, dict) else __builtins__.input
-        
-        def mock_input(prompt=""):
-            # Detect verification prompts
-            prompt_lower = prompt.lower()
-            
-            if "confirmation code" in prompt_lower and "sent" in prompt_lower:
-                # Email confirmation code prompt
+        original_input = __builtins__["input"] if isinstance(__builtins__, dict) else __builtins__.input
+
+        def mock_input(prompt: str = ""):
+            """Intercept input prompts and raise challenges when detected."""
+            # Combine last printed line with the prompt text for detection
+            output = captured.getvalue().strip().splitlines()
+            last_line = output[-1] if output else ""
+            combined = f"{last_line} {prompt}".lower()
+
+            if "confirmation code" in combined and "sent" in combined:
                 challenge_type = "confirmation_code"
-                hint = self._extract_email_hint(prompt)
-                raise VerificationChallenge(challenge_type, prompt, hint)
-            
-            elif "email address" in prompt_lower and "verify" in prompt_lower:
-                # Email verification prompt
+                hint = self._extract_email_hint(combined)
+                raise VerificationChallenge(challenge_type, last_line or prompt, hint)
+
+            if ("email address" in combined and "verify" in combined) or "verify your identity" in combined:
                 challenge_type = "email_verification"
-                hint = self._extract_email_hint(prompt)
-                raise VerificationChallenge(challenge_type, prompt, hint)
-            
-            # Check if we have a pending response for this session
+                hint = self._extract_email_hint(combined)
+                raise VerificationChallenge(challenge_type, last_line or prompt, hint)
+
+            # Check for a previously supplied verification response
             session = self.session_manager.get_session(session_id)
-            if session and session.get('verification_response'):
-                response = session['verification_response']
-                # Clear the response so it's only used once
-                session['verification_response'] = None
+            if session and session.get("verification_response"):
+                response = session["verification_response"]
+                session["verification_response"] = None
                 return response
-            
-            # If no verification response available, this is an unexpected input prompt
+
             raise RuntimeError(f"Unexpected input prompt: {prompt}")
-        
-        # Patch the input function
+
         try:
+            # Patch the input function and capture stdout/stderr from twikit
             if isinstance(__builtins__, dict):
-                __builtins__['input'] = mock_input
+                __builtins__["input"] = mock_input
             else:
                 __builtins__.input = mock_input
-            
-            # Attempt login
-            await client.login(
-                auth_info_1=auth_id,
-                password=password,
-                cookies_file=cookies_file,
-            )
-            
+
+            with redirect_stdout(captured), redirect_stderr(captured):
+                await client.login(
+                    auth_info_1=auth_id,
+                    password=password,
+                    cookies_file=cookies_file,
+                )
+
         finally:
             # Restore original input function
             if isinstance(__builtins__, dict):
-                __builtins__['input'] = original_input
+                __builtins__["input"] = original_input
             else:
                 __builtins__.input = original_input
     
