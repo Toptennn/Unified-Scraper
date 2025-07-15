@@ -60,10 +60,14 @@ export default function TwitterPage() {
           password,
           query,
           count: parseInt(count.toString()),
-          mode,
-          start_date: startDate || null,
-          end_date: endDate || null,
+          mode: mode, // Use 'latest' for date_range mode
         };
+        
+        // Only include date parameters for date_range mode
+        if (mode === 'date_range') {
+          body.start_date = startDate || null;
+          body.end_date = endDate || null;
+        }
       }
 
       const res = await fetch(endpoint, {
@@ -218,16 +222,18 @@ export default function TwitterPage() {
                   <option value="timeline">User Timeline</option>
                   <option value="latest">Latest Tweets</option>
                   <option value="popular">Popular Tweets</option>
+                  <option value="date_range">Date Range Search</option>
                 </select>
               </div>
 
               {/* Conditional Fields */}
-              {mode === 'timeline' ? (
+              {mode === 'timeline' && (
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="screenName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Screen Name (Username)
                   </label>
                   <input
+                    id="screenName"
                     type="text"
                     value={screenName}
                     onChange={(e) => setScreenName(e.target.value)}
@@ -236,13 +242,15 @@ export default function TwitterPage() {
                     required
                   />
                 </div>
-              ) : (
+              )}
+              {mode === 'date_range' && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <label htmlFor="queryDateRange" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Search Query
                     </label>
                     <input
+                      id="queryDateRange"
                       type="text"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
@@ -253,10 +261,11 @@ export default function TwitterPage() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Start Date
                       </label>
                       <input
+                        id="startDate"
                         type="date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
@@ -264,16 +273,35 @@ export default function TwitterPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                         End Date
                       </label>
                       <input
+                        id="endDate"
                         type="date"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                     </div>
+                  </div>
+                </div>
+              )}
+              {(mode === 'latest' || mode === 'popular') && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="querySearch" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Search Query
+                    </label>
+                    <input
+                      id="querySearch"
+                      type="text"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Enter search terms..."
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      required
+                    />
                   </div>
                 </div>
               )}
