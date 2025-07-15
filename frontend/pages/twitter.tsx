@@ -19,6 +19,8 @@ export default function TwitterPage() {
   const [loading, setLoading] = useState<boolean>(false);
   const [tweets, setTweets] = useState<Tweet[]>([]);
   const [error, setError] = useState<string>('');
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [challengeInput, setChallengeInput] = useState<string>('');
   
   // Filter states
   const [usernameFilter, setUsernameFilter] = useState<string>('');
@@ -46,6 +48,7 @@ export default function TwitterPage() {
     setLoading(true);
     setTweets([]);
     setError('');
+    setChallenge(null);
 
     try {
       let endpoint = '';
@@ -65,6 +68,9 @@ export default function TwitterPage() {
           end_date: endDate || null,
         };
       }
+      if (challengeInput) {
+        body.challenge_response = challengeInput;
+      }
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -72,6 +78,13 @@ export default function TwitterPage() {
         body: JSON.stringify(body),
       });
       
+      if (res.status === 401) {
+        const data = await res.json();
+        setChallenge(data.challenge);
+        setLoading(false);
+        showToast('Verification required', 'error');
+        return;
+      }
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
@@ -203,6 +216,20 @@ export default function TwitterPage() {
                     required
                   />
                 </div>
+                {challenge && (
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {challenge}
+                    </label>
+                    <input
+                      type="text"
+                      value={challengeInput}
+                      onChange={(e) => setChallengeInput(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      required
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Mode Selection */}

@@ -4,6 +4,15 @@ import random
 from typing import List, Optional, Callable
 
 from twikit import Client
+import builtins
+
+
+class ChallengeNeeded(Exception):
+    """Raised when Twitter requires additional verification during login."""
+
+    def __init__(self, prompt: str) -> None:
+        super().__init__(prompt)
+        self.prompt = prompt
 
 from config import TwitterConfig, RateLimitConfig, SearchParameters
 from rate_limiter import RateLimitHandler
@@ -33,8 +42,25 @@ class TwitterScraper:
             rate_limit_config,
             reauth_callback=self.authenticate,)
     
-    async def authenticate(self, cleanup_cookie: bool = False) -> None:
-        """Authenticate with Twitter and refresh cookies if needed."""
+    async def authenticate(
+        self,
+        cleanup_cookie: bool = False,
+        challenge_response: str | None = None,
+    ) -> None:
+        """Authenticate with Twitter and refresh cookies if needed.
+
+        If Twitter requires additional verification (e.g. confirmation code or
+        email), a :class:`ChallengeNeeded` exception is raised with the prompt
+        message unless ``challenge_response`` is provided.
+        """
+
+        def _input_patch(prompt: str = "") -> str:
+            if challenge_response is None:
+                raise ChallengeNeeded(prompt)
+            return challenge_response
+
+        orig_input = builtins.input
+        builtins.input = _input_patch
         try:
             await self.rate_limiter.execute_with_rate_limit(
                 self.client.login,
@@ -42,6 +68,8 @@ class TwitterScraper:
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )
+        except ChallengeNeeded:
+            raise
         except Exception as e:
             logger.warning(f"Initial login failed: {e}. Refreshing cookie...")
             self.cookie_manager.delete_cookie(self.config.credentials.auth_id)
@@ -54,6 +82,8 @@ class TwitterScraper:
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )
+        finally:
+            builtins.input = orig_input
 
         logger.info("Successfully authenticated with Twitter")
 

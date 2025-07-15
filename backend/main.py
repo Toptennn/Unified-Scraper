@@ -1,12 +1,13 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from scraper import DuckDuckGoScraper, TwitterScraper
+from scraper.X import ChallengeNeeded
 
 
 from config import TwitterConfig, TwitterCredentials, SearchParameters, SearchMode
-from scraper import TwitterScraper
 from cookie_manager import RedisCookieManager
 from data_utils import TweetDataExtractor
 
@@ -46,6 +47,7 @@ class TimelineRequest(BaseModel):
     password: str
     screen_name: str
     count: int = 50
+    challenge_response: Optional[str] = None
 
 
 class SearchRequestX(BaseModel):
@@ -56,6 +58,7 @@ class SearchRequestX(BaseModel):
     mode: SearchMode = SearchMode.POPULAR
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    challenge_response: Optional[str] = None
 
 
 def _add_normal_query(queries, parts):
@@ -139,8 +142,13 @@ def health_check():
 
 
 
-async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
-    """Initialize scraper with credentials and authenticate."""
+async def create_scraper(auth_id: str, password: str, challenge_response: str | None = None) -> TwitterScraper:
+    """Initialize scraper with credentials and authenticate.
+
+    If a login challenge is triggered during authentication and no
+    ``challenge_response`` is provided, a ``ChallengeNeeded`` exception will be
+    propagated to the caller with the prompt message.
+    """
     cookie_manager = RedisCookieManager()
     cookie_path = cookie_manager.load_cookie(auth_id)
     first_login = not cookie_path.exists()
@@ -151,28 +159,34 @@ async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
     )
     config = TwitterConfig(credentials=credentials, output_dir="output")
     scraper = TwitterScraper(config, cookie_manager=cookie_manager)
-    await scraper.authenticate(cleanup_cookie=first_login)
+    await scraper.authenticate(cleanup_cookie=first_login, challenge_response=challenge_response)
     return scraper
 
 @app.post("/X/timeline")
 async def scrape_timeline(req: TimelineRequest):
     """Fetch tweets from a user's timeline."""
-    scraper = await create_scraper(req.auth_id, req.password)
-    user = await scraper.get_user_by_screen_name(req.screen_name)
-    tweets = await scraper.fetch_user_timeline(user.id, count=req.count)
-    return TweetDataExtractor.extract_tweet_data(tweets)
+    try:
+        scraper = await create_scraper(req.auth_id, req.password, req.challenge_response)
+        user = await scraper.get_user_by_screen_name(req.screen_name)
+        tweets = await scraper.fetch_user_timeline(user.id, count=req.count)
+        return TweetDataExtractor.extract_tweet_data(tweets)
+    except ChallengeNeeded as c:
+        return JSONResponse(status_code=401, content={"challenge": c.prompt})
 
 
 @app.post("/X/search")
 async def search_tweets(req: SearchRequestX):
     """Search tweets based on query parameters."""
-    scraper = await create_scraper(req.auth_id, req.password)
-    params = SearchParameters(
-        query=req.query,
-        count=req.count,
-        mode=req.mode,
-        start_date=req.start_date,
-        end_date=req.end_date,
-    )
-    tweets = await scraper.search_tweets(params)
-    return TweetDataExtractor.extract_tweet_data(tweets)
+    try:
+        scraper = await create_scraper(req.auth_id, req.password, req.challenge_response)
+        params = SearchParameters(
+            query=req.query,
+            count=req.count,
+            mode=req.mode,
+            start_date=req.start_date,
+            end_date=req.end_date,
+        )
+        tweets = await scraper.search_tweets(params)
+        return TweetDataExtractor.extract_tweet_data(tweets)
+    except ChallengeNeeded as c:
+        return JSONResponse(status_code=401, content={"challenge": c.prompt})
