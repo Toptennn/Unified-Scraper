@@ -93,10 +93,6 @@ class RedisCookieManager:
             return
 
         key = self._key(auth_id)
-        if self.cache.get(key) == content:
-            if cleanup:
-                self._remove_local(path)
-            return
 
         try:
             self.redis.set(key, content, ex=self.ttl_seconds)
