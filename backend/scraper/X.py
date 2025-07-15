@@ -33,8 +33,8 @@ class TwitterScraper:
             rate_limit_config,
             reauth_callback=self.authenticate,)
     
-    async def authenticate(self) -> None:
-        """Authenticate with Twitter using provided credentials."""
+    async def authenticate(self, cleanup_cookie: bool = False) -> None:
+        """Authenticate with Twitter and refresh cookies if needed."""
         try:
             await self.rate_limiter.execute_with_rate_limit(
                 self.client.login,
@@ -42,16 +42,25 @@ class TwitterScraper:
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )
-            logger.info("Successfully authenticated with Twitter")
-
-            # Persist updated cookies to Redis
-            self.cookie_manager.save_cookie(self.config.credentials.auth_id)
-            
-            await self._human_delay(long=False)
-            
         except Exception as e:
-            logger.error(f"Authentication failed: {e}")
-            raise
+            logger.warning(f"Initial login failed: {e}. Refreshing cookie...")
+            self.cookie_manager.delete_cookie(self.config.credentials.auth_id)
+            self.config.credentials.cookies_file = str(
+                self.cookie_manager.get_cookie_path(self.config.credentials.auth_id)
+            )
+            await self.rate_limiter.execute_with_rate_limit(
+                self.client.login,
+                auth_info_1=self.config.credentials.auth_id,
+                password=self.config.credentials.password,
+                cookies_file=self.config.credentials.cookies_file,
+            )
+
+        logger.info("Successfully authenticated with Twitter")
+
+        # Persist updated cookies to Redis
+        self.cookie_manager.save_cookie(self.config.credentials.auth_id, cleanup=cleanup_cookie)
+
+        await self._human_delay(long=False)
 
     async def _human_delay(self, long: bool = False) -> None:
         """
