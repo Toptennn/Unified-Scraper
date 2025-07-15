@@ -49,13 +49,13 @@ export default function TwitterPage() {
 
     try {
       let endpoint = '';
-      let body: any = {};
+      let baseBody: any = {};
       if (mode === 'timeline') {
         endpoint = `${API_URL}/X/timeline`;
-        body = { auth_id: authId, password, screen_name: screenName, count: parseInt(count.toString()) };
+        baseBody = { auth_id: authId, password, screen_name: screenName, count: parseInt(count.toString()) };
       } else {
         endpoint = `${API_URL}/X/search`;
-        body = {
+        baseBody = {
           auth_id: authId,
           password,
           query,
@@ -66,16 +66,33 @@ export default function TwitterPage() {
         };
       }
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+      const verificationResponses: string[] = [];
+      let res: Response;
+
+      while (true) {
+        const body = { ...baseBody, verification_responses: verificationResponses };
+        res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (res.status === 401) {
+          const data = await res.json();
+          const answer = window.prompt(data.prompt || 'Verification required');
+          if (answer === null) {
+            throw new Error('Verification cancelled');
+          }
+          verificationResponses.push(answer);
+          continue;
+        }
+
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        break;
       }
-      
+
       const data: Tweet[] = await res.json();
       setTweets(data);
       showToast(`Successfully scraped ${data.length} tweets!`);

@@ -75,6 +75,7 @@ export interface TwitterSearchParams {
   mode: string;
   start_date?: string | null;
   end_date?: string | null;
+  verification_responses?: string[];
 }
 
 export interface ApiResponse<T> {

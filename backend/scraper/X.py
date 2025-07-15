@@ -1,7 +1,15 @@
 import asyncio
 import logging
 import random
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Iterable
+import builtins
+
+class VerificationRequired(Exception):
+    """Raised when additional verification input is needed."""
+
+    def __init__(self, prompt: str) -> None:
+        self.prompt = prompt
+        super().__init__(prompt)
 
 from twikit import Client
 
@@ -33,8 +41,31 @@ class TwitterScraper:
             rate_limit_config,
             reauth_callback=self.authenticate,)
     
-    async def authenticate(self, cleanup_cookie: bool = False) -> None:
-        """Authenticate with Twitter and refresh cookies if needed."""
+    async def authenticate(
+        self,
+        cleanup_cookie: bool = False,
+        verification_responses: Optional[List[str]] = None,
+    ) -> None:
+        """Authenticate with Twitter and refresh cookies if needed.
+
+        If additional verification is required (e.g. email or code), this
+        method will raise :class:`VerificationRequired` with the prompt so the
+        caller can ask the user for input via the frontend.
+        """
+
+        responses: Iterable[str] = verification_responses or []
+        response_iter = iter(responses)
+
+        original_input = builtins.input
+
+        def _intercept_input(prompt: str = "") -> str:
+            try:
+                return next(response_iter)
+            except StopIteration:
+                raise VerificationRequired(prompt)
+
+        builtins.input = _intercept_input
+
         try:
             await self.rate_limiter.execute_with_rate_limit(
                 self.client.login,
@@ -42,18 +73,23 @@ class TwitterScraper:
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.warning(f"Initial login failed: {e}. Refreshing cookie...")
             self.cookie_manager.delete_cookie(self.config.credentials.auth_id)
             self.config.credentials.cookies_file = str(
                 self.cookie_manager.get_cookie_path(self.config.credentials.auth_id)
             )
+            builtins.input = _intercept_input
             await self.rate_limiter.execute_with_rate_limit(
                 self.client.login,
                 auth_info_1=self.config.credentials.auth_id,
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )
+        finally:
+            builtins.input = original_input
 
         logger.info("Successfully authenticated with Twitter")
 

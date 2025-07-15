@@ -1,12 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from scraper import DuckDuckGoScraper, TwitterScraper
-
+from scraper.X import VerificationRequired
 
 from config import TwitterConfig, TwitterCredentials, SearchParameters, SearchMode
-from scraper import TwitterScraper
 from cookie_manager import RedisCookieManager
 from data_utils import TweetDataExtractor
 
@@ -46,6 +45,7 @@ class TimelineRequest(BaseModel):
     password: str
     screen_name: str
     count: int = 50
+    verification_responses: Optional[List[str]] = None
 
 
 class SearchRequestX(BaseModel):
@@ -56,6 +56,7 @@ class SearchRequestX(BaseModel):
     mode: SearchMode = SearchMode.POPULAR
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    verification_responses: Optional[List[str]] = None
 
 
 def _add_normal_query(queries, parts):
@@ -139,7 +140,11 @@ def health_check():
 
 
 
-async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
+async def create_scraper(
+    auth_id: str,
+    password: str,
+    verification_responses: Optional[List[str]] = None,
+) -> TwitterScraper:
     """Initialize scraper with credentials and authenticate."""
     cookie_manager = RedisCookieManager()
     cookie_path = cookie_manager.load_cookie(auth_id)
@@ -151,13 +156,24 @@ async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
     )
     config = TwitterConfig(credentials=credentials, output_dir="output")
     scraper = TwitterScraper(config, cookie_manager=cookie_manager)
-    await scraper.authenticate(cleanup_cookie=first_login)
+    await scraper.authenticate(
+        cleanup_cookie=first_login,
+        verification_responses=verification_responses,
+    )
     return scraper
 
 @app.post("/X/timeline")
 async def scrape_timeline(req: TimelineRequest):
     """Fetch tweets from a user's timeline."""
-    scraper = await create_scraper(req.auth_id, req.password)
+    try:
+        scraper = await create_scraper(
+            req.auth_id,
+            req.password,
+            req.verification_responses,
+        )
+    except VerificationRequired as e:
+        raise HTTPException(status_code=401, detail={"prompt": e.prompt})
+
     user = await scraper.get_user_by_screen_name(req.screen_name)
     tweets = await scraper.fetch_user_timeline(user.id, count=req.count)
     return TweetDataExtractor.extract_tweet_data(tweets)
@@ -166,7 +182,15 @@ async def scrape_timeline(req: TimelineRequest):
 @app.post("/X/search")
 async def search_tweets(req: SearchRequestX):
     """Search tweets based on query parameters."""
-    scraper = await create_scraper(req.auth_id, req.password)
+    try:
+        scraper = await create_scraper(
+            req.auth_id,
+            req.password,
+            req.verification_responses,
+        )
+    except VerificationRequired as e:
+        raise HTTPException(status_code=401, detail={"prompt": e.prompt})
+
     params = SearchParameters(
         query=req.query,
         count=req.count,
