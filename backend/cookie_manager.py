@@ -33,6 +33,12 @@ class RedisCookieManager:
             
         self.cache: Dict[str, str] = {}
 
+        ttl_env = os.getenv("COOKIE_TTL_SECONDS")
+        try:
+            self.ttl_seconds = int(ttl_env) if ttl_env else 60 * 60 * 24 * 30
+        except ValueError:
+            self.ttl_seconds = 60 * 60 * 24 * 30
+
     def _safe_id(self, auth_id: str) -> str:
         safe = "".join(c for c in auth_id if c.isalnum() or c in ("_", "-"))
         return safe.lower() or "anonymous"
@@ -71,8 +77,8 @@ class RedisCookieManager:
                 logger.warning(f"Failed writing cookie file {path}: {e}")
         return path
 
-    def save_cookie(self, auth_id: str) -> None:
-        """Upload cookie file to Redis if changed."""
+    def save_cookie(self, auth_id: str, cleanup: bool = False) -> None:
+        """Upload cookie file to Redis if changed. Optionally delete local file."""
         if not self.redis:
             return
 
@@ -88,10 +94,34 @@ class RedisCookieManager:
 
         key = self._key(auth_id)
         if self.cache.get(key) == content:
+            if cleanup:
+                self._remove_local(path)
             return
 
         try:
-            self.redis.set(key, content)
+            self.redis.set(key, content, ex=self.ttl_seconds)
             self.cache[key] = content
         except Exception as e:
             logger.warning(f"Redis set failed: {e}")
+            return
+
+        if cleanup:
+            self._remove_local(path)
+
+    def delete_cookie(self, auth_id: str) -> None:
+        """Remove cookie from both local storage and Redis."""
+        path = self.get_cookie_path(auth_id)
+        self._remove_local(path)
+
+        if self.redis:
+            try:
+                self.redis.delete(self._key(auth_id))
+            except Exception as e:
+                logger.warning(f"Redis delete failed: {e}")
+
+    def _remove_local(self, path: Path) -> None:
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception as e:
+            logger.warning(f"Failed deleting cookie file {path}: {e}")
