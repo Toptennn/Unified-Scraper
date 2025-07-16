@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 import SearchForm from '../components/SearchForm';
@@ -10,34 +10,49 @@ const DuckDuckGoPage: React.FC = () => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [searchInfo, setSearchInfo] = useState<SearchInfo | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const handleSearch = async (formData: SearchFormData): Promise<void> => {
     setLoading(true);
     setError(null);
     setResults([]);
     setSearchInfo(null);
-    
-    try {
-      const response = await axios.post<SearchResponse>('http://127.0.0.1:8000/ddg/search', formData);
-      const { data } = response;
-      
-      setResults(data.results);
-      setSearchInfo({
-        query: data.query,
-        pages_retrieved: data.pages_retrieved,
-        total_results: data.results.length
-      });
-    } catch (err) {
-      console.error(err);
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.detail || 'An error occurred while searching');
-      } else {
-        setError('An unexpected error occurred');
+    setProgress(0);
+
+    const params = new URLSearchParams(formData as any).toString();
+    const es = new EventSource(`http://127.0.0.1:8000/ddg/search-stream?${params}`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === 'progress') {
+        const pct = (data.current / data.total) * 100;
+        setProgress(pct);
+      } else if (data.type === 'complete') {
+        setResults(data.results);
+        setSearchInfo({
+          query: data.query,
+          pages_retrieved: data.pages_retrieved,
+          total_results: data.results.length
+        });
+        setLoading(false);
+        es.close();
       }
-    } finally {
+    };
+
+    es.onerror = () => {
+      setError('An error occurred while searching');
       setLoading(false);
-    }
+      es.close();
+    };
   };
+
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+    };
+  }, []);
 
   return (
     <Layout 
@@ -58,11 +73,12 @@ const DuckDuckGoPage: React.FC = () => {
 
           <SearchForm onSubmit={handleSearch} loading={loading} />
           
-          <SearchResults 
+          <SearchResults
             results={results}
             searchInfo={searchInfo}
             loading={loading}
             error={error}
+            progress={progress}
           />
         </div>
       </div>

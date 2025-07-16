@@ -1,5 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
+import queue
+import threading
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from scraper import DuckDuckGoScraper, TwitterScraper
@@ -135,6 +140,74 @@ def search(req: SearchRequestDDG):
     results = df.to_dict(orient="records")
     return SearchResult(query=final_query, pages_retrieved=pages_retrieved, results=results)
 
+
+@app.get("/ddg/search-stream")
+async def search_stream(request: Request,
+                        normal_query: str = "",
+                        exact_phrase: str = "",
+                        semantic_query: str = "",
+                        include_terms: str = "",
+                        exclude_terms: str = "",
+                        filetype: str = "",
+                        site_include: str = "",
+                        site_exclude: str = "",
+                        intitle: str = "",
+                        inurl: str = "",
+                        max_pages: int = 20,
+                        start_date: Optional[str] = None,
+                        end_date: Optional[str] = None):
+    queries = {
+        "normal_query": normal_query,
+        "exact_phrase": exact_phrase,
+        "semantic_query": semantic_query,
+        "include_terms": include_terms,
+        "exclude_terms": exclude_terms,
+        "filetype": filetype,
+        "site_include": site_include,
+        "site_exclude": site_exclude,
+        "intitle": intitle,
+        "inurl": inurl,
+    }
+    final_query = build_query(queries)
+    scraper = DuckDuckGoScraper()
+    q: queue.Queue = queue.Queue()
+
+    def progress_callback(cur: int, total: int, _msg: str):
+        q.put({"type": "progress", "current": cur, "total": total})
+
+    def run():
+        df, pages_retrieved = scraper.scrape(
+            final_query,
+            max_pages,
+            headless=True,
+            progress_callback=progress_callback,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        q.put({
+            "type": "complete",
+            "query": final_query,
+            "pages_retrieved": pages_retrieved,
+            "results": df.to_dict(orient="records"),
+        })
+
+    threading.Thread(target=run, daemon=True).start()
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                item = q.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.1)
+                continue
+            yield f"data: {json.dumps(item)}\n\n"
+            if item.get("type") == "complete":
+                break
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 @app.get("/")
 def health_check():
     return {"status": "healthy", "message": "DuckDuckGo Scraper API is running"}
@@ -178,3 +251,96 @@ async def search_tweets(req: SearchRequestX):
     )
     tweets = await scraper.search_tweets(params)
     return TweetDataExtractor.extract_tweet_data(tweets)
+
+
+@app.get("/X/timeline-stream")
+async def timeline_stream(request: Request,
+                          auth_id: str,
+                          auth_info_2: str,
+                          password: str,
+                          screen_name: str,
+                          count: int = 50):
+    scraper = await create_scraper(auth_id, auth_info_2, password)
+    user = await scraper.get_user_by_screen_name(screen_name)
+    q: asyncio.Queue = asyncio.Queue()
+
+    def progress_callback(progress: float, current: int, total: int, _):
+        q.put_nowait({"type": "progress", "current": current, "total": total})
+
+    async def run():
+        tweets = await scraper.fetch_user_timeline(
+            user.id, count=count, progress_callback=progress_callback
+        )
+        q.put_nowait({
+            "type": "complete",
+            "results": TweetDataExtractor.extract_tweet_data(tweets)
+        })
+
+    task = asyncio.create_task(run())
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                task.cancel()
+                break
+            try:
+                item = q.get_nowait()
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.1)
+                continue
+            yield f"data: {json.dumps(item)}\n\n"
+            if item.get("type") == "complete":
+                break
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/X/search-stream")
+async def search_stream_x(request: Request,
+                          auth_id: str,
+                          auth_info_2: str,
+                          password: str,
+                          query: str,
+                          count: int = 50,
+                          mode: SearchMode = SearchMode.POPULAR,
+                          start_date: Optional[str] = None,
+                          end_date: Optional[str] = None):
+    scraper = await create_scraper(auth_id, auth_info_2, password)
+    params = SearchParameters(
+        query=query,
+        count=count,
+        mode=mode,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    q: asyncio.Queue = asyncio.Queue()
+
+    def progress_callback(progress: float, current: int, total: int, _):
+        q.put_nowait({"type": "progress", "current": current, "total": total})
+
+    async def run():
+        tweets = await scraper.search_tweets(
+            params, progress_callback=progress_callback
+        )
+        q.put_nowait({
+            "type": "complete",
+            "results": TweetDataExtractor.extract_tweet_data(tweets)
+        })
+
+    task = asyncio.create_task(run())
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                task.cancel()
+                break
+            try:
+                item = q.get_nowait()
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.1)
+                continue
+            yield f"data: {json.dumps(item)}\n\n"
+            if item.get("type") == "complete":
+                break
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

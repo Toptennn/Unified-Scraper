@@ -1,7 +1,8 @@
 import { SearchResultsProps } from '../types';
 import ResultsTable from './ResultsTable';
+import ProgressBar from './ProgressBar';
 
-const SearchResults: React.FC<SearchResultsProps> = ({ results, searchInfo, loading, error }) => {
+const SearchResults: React.FC<SearchResultsProps> = ({ results, searchInfo, loading, error, progress }) => {
   if (loading) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 text-center">
@@ -18,6 +19,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ results, searchInfo, load
               This may take a few moments while we gather results
             </p>
           </div>
+          <ProgressBar progress={progress} label={`${Math.round(progress)}%`} />
         </div>
       </div>
     );
