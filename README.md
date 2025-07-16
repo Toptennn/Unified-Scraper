@@ -182,23 +182,3 @@ cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-This project is for educational and research purposes. Please respect the terms of service of the platforms being scraped.
-
-## Disclaimer
-
-This tool is for educational and research purposes only. Users are responsible for complying with the terms of service of DuckDuckGo, Twitter/X, and any other platforms they interact with. The developers are not responsible for any misuse of this tool.
-
-## Support
-
-For issues, questions, or contributions, please open an issue on the project repository.
