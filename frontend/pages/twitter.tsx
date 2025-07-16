@@ -22,6 +22,8 @@ export default function TwitterPage() {
   const [tweets, setTweets] = useState<Tweet[]>([]);
   const [error, setError] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
+  const [progressCurrent, setProgressCurrent] = useState<number>(0);
+  const [progressTotal, setProgressTotal] = useState<number>(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   
   // Filter states
@@ -51,6 +53,8 @@ export default function TwitterPage() {
     setTweets([]);
     setError('');
     setProgress(0);
+    setProgressCurrent(0);
+    setProgressTotal(0);
 
     let params: Record<string, any> = {
       auth_id: authId,
@@ -82,6 +86,8 @@ export default function TwitterPage() {
       if (data.type === 'progress') {
         const pct = (data.current / data.total) * 100;
         setProgress(pct);
+        setProgressCurrent(data.current);
+        setProgressTotal(data.total);
       } else if (data.type === 'complete') {
         setTweets(data.results);
         showToast(`Successfully scraped ${data.results.length} tweets!`);
@@ -367,8 +373,11 @@ export default function TwitterPage() {
                 )}
               </button>
               {loading && (
-                <div className="mt-4">
-                  <ProgressBar progress={progress} label={`${Math.round(progress)}%`} />
+                <div className="mt-6 space-y-2">
+                  <ProgressBar 
+                    progress={progress} 
+                    label={`Fetching tweets: ${progressCurrent} / ${progressTotal}`}
+                  />
                 </div>
               )}
             </form>

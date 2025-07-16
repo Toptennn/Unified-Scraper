@@ -112,11 +112,11 @@ class TwitterScraper:
                     break
                 
                 all_tweets.extend(tweets)
-                progress = len(all_tweets) / count
+                progress = min(1.0, len(all_tweets) / count)
                 
                 # Call progress callback if provided
                 if progress_callback:
-                    progress_callback(progress, len(all_tweets), count, tweets)
+                    progress_callback(progress, min(len(all_tweets), count), count, tweets)
                 
                 logger.info(f"Fetched {len(tweets)} tweets (Total: {len(all_tweets)})")
                 
@@ -166,11 +166,11 @@ class TwitterScraper:
                     break
                 
                 all_tweets.extend(results)
-                progress = len(all_tweets) / search_params.count
+                progress = min(1.0, len(all_tweets) / search_params.count)
                 
                 # Call progress callback if provided
                 if progress_callback:
-                    progress_callback(progress, len(all_tweets), search_params.count, results)
+                    progress_callback(progress, min(len(all_tweets), search_params.count), search_params.count, results)
                 
                 logger.info(f"Found {len(results)} tweets (Total: {len(all_tweets)})")
                 
