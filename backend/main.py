@@ -143,7 +143,6 @@ async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
     """Initialize scraper with credentials and authenticate."""
     cookie_manager = RedisCookieManager()
     cookie_path = cookie_manager.load_cookie(auth_id)
-    first_login = not cookie_path.exists()
     credentials = TwitterCredentials(
         auth_id=auth_id,
         password=password,
@@ -151,7 +150,7 @@ async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
     )
     config = TwitterConfig(credentials=credentials, output_dir="output")
     scraper = TwitterScraper(config, cookie_manager=cookie_manager)
-    await scraper.authenticate(cleanup_cookie=first_login)
+    await scraper.authenticate(cleanup_cookie=True)
     return scraper
 
 @app.post("/X/timeline")
