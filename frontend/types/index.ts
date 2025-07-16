@@ -68,6 +68,7 @@ export interface Toast {
 
 export interface TwitterSearchParams {
   auth_id: string;
+  auth_info_2: string;  // Email address
   password: string;
   screen_name?: string;
   query?: string;

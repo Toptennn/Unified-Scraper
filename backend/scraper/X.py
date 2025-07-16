@@ -39,6 +39,7 @@ class TwitterScraper:
             await self.rate_limiter.execute_with_rate_limit(
                 self.client.login,
                 auth_info_1=self.config.credentials.auth_id,
+                auth_info_2=self.config.credentials.auth_info_2,
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )
@@ -51,6 +52,7 @@ class TwitterScraper:
             await self.rate_limiter.execute_with_rate_limit(
                 self.client.login,
                 auth_info_1=self.config.credentials.auth_id,
+                auth_info_2=self.config.credentials.auth_info_2,
                 password=self.config.credentials.password,
                 cookies_file=self.config.credentials.cookies_file,
             )

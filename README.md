@@ -109,8 +109,11 @@ unified-scraper/
 6. Export data as CSV or Excel
 
 ### X (Twitter) Scraper
-1. Navigate to `/X`
-2. Enter your Twitter credentials
+1. Navigate to `/twitter`
+2. Enter your Twitter credentials:
+   - **Auth ID/Username**: Your Twitter username or phone number
+   - **Email Address**: Your Twitter account email address  
+   - **Password**: Your Twitter password
 3. Choose scraping mode (timeline, latest, popular)
 4. Configure search parameters or username
 5. Set the number of tweets to retrieve

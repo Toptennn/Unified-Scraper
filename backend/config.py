@@ -150,6 +150,7 @@ class RateLimitConfig:
 class TwitterCredentials:
     """Login / cookie information."""
     auth_id: str
+    auth_info_2: str  # Email address
     password: str
     # Path to this user’s cookie file; None ➜ login each time
     cookies_file: Optional[str] = None
@@ -187,7 +188,7 @@ class TwitterConfig:
     def create_default(cls) -> "TwitterConfig":
         """Blank config stub – fill in credentials later."""
         return cls(
-            credentials=TwitterCredentials(auth_id="", password="", cookies_file=None)
+            credentials=TwitterCredentials(auth_id="", auth_info_2="", password="", cookies_file=None)
         )
 
 

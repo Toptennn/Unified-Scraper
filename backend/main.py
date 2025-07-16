@@ -43,6 +43,7 @@ class SearchResult(BaseModel):
 
 class TimelineRequest(BaseModel):
     auth_id: str
+    auth_info_2: str  # Email address
     password: str
     screen_name: str
     count: int = 50
@@ -50,6 +51,7 @@ class TimelineRequest(BaseModel):
 
 class SearchRequestX(BaseModel):
     auth_id: str
+    auth_info_2: str  # Email address
     password: str
     query: str
     count: int = 50
@@ -139,12 +141,13 @@ def health_check():
 
 
 
-async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
+async def create_scraper(auth_id: str, auth_info_2: str, password: str) -> TwitterScraper:
     """Initialize scraper with credentials and authenticate."""
     cookie_manager = RedisCookieManager()
     cookie_path = cookie_manager.load_cookie(auth_id)
     credentials = TwitterCredentials(
         auth_id=auth_id,
+        auth_info_2=auth_info_2,
         password=password,
         cookies_file=str(cookie_path)
     )
@@ -156,7 +159,7 @@ async def create_scraper(auth_id: str, password: str) -> TwitterScraper:
 @app.post("/X/timeline")
 async def scrape_timeline(req: TimelineRequest):
     """Fetch tweets from a user's timeline."""
-    scraper = await create_scraper(req.auth_id, req.password)
+    scraper = await create_scraper(req.auth_id, req.auth_info_2, req.password)
     user = await scraper.get_user_by_screen_name(req.screen_name)
     tweets = await scraper.fetch_user_timeline(user.id, count=req.count)
     return TweetDataExtractor.extract_tweet_data(tweets)
@@ -165,7 +168,7 @@ async def scrape_timeline(req: TimelineRequest):
 @app.post("/X/search")
 async def search_tweets(req: SearchRequestX):
     """Search tweets based on query parameters."""
-    scraper = await create_scraper(req.auth_id, req.password)
+    scraper = await create_scraper(req.auth_id, req.auth_info_2, req.password)
     params = SearchParameters(
         query=req.query,
         count=req.count,

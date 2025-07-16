@@ -9,6 +9,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function TwitterPage() {
   const [authId, setAuthId] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [mode, setMode] = useState<string>('timeline');
   const [screenName, setScreenName] = useState<string>('');
@@ -52,11 +53,12 @@ export default function TwitterPage() {
       let body: any = {};
       if (mode === 'timeline') {
         endpoint = `${API_URL}/X/timeline`;
-        body = { auth_id: authId, password, screen_name: screenName, count: parseInt(count.toString()) };
+        body = { auth_id: authId, auth_info_2: email, password, screen_name: screenName, count: parseInt(count.toString()) };
       } else {
         endpoint = `${API_URL}/X/search`;
         body = {
           auth_id: authId,
+          auth_info_2: email,
           password,
           query,
           count: parseInt(count.toString()),
@@ -182,7 +184,7 @@ export default function TwitterPage() {
             
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Credentials */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Auth ID / Username
@@ -191,6 +193,18 @@ export default function TwitterPage() {
                     type="text"
                     value={authId}
                     onChange={(e) => setAuthId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     required
                   />
