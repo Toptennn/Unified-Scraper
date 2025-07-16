@@ -47,6 +47,7 @@ export interface SearchResultsProps {
   searchInfo: SearchInfo | null;
   loading: boolean;
   error: string | null;
+  progress: number;
 }
 
 // Twitter/X Scraper Types

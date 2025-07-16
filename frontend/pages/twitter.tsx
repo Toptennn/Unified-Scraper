@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import Layout from '../components/Layout';
 import TweetTable from '../components/TweetTable';
+import ProgressBar from '../components/ProgressBar';
 import type { Tweet, Toast, TwitterSearchParams } from '../types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -20,6 +21,8 @@ export default function TwitterPage() {
   const [loading, setLoading] = useState<boolean>(false);
   const [tweets, setTweets] = useState<Tweet[]>([]);
   const [error, setError] = useState<string>('');
+  const [progress, setProgress] = useState<number>(0);
+  const eventSourceRef = useRef<EventSource | null>(null);
   
   // Filter states
   const [usernameFilter, setUsernameFilter] = useState<string>('');
@@ -47,52 +50,59 @@ export default function TwitterPage() {
     setLoading(true);
     setTweets([]);
     setError('');
+    setProgress(0);
 
-    try {
-      let endpoint = '';
-      let body: any = {};
-      if (mode === 'timeline') {
-        endpoint = `${API_URL}/X/timeline`;
-        body = { auth_id: authId, auth_info_2: email, password, screen_name: screenName, count: parseInt(count.toString()) };
-      } else {
-        endpoint = `${API_URL}/X/search`;
-        body = {
-          auth_id: authId,
-          auth_info_2: email,
-          password,
-          query,
-          count: parseInt(count.toString()),
-          mode: mode, // Use 'latest' for date_range mode
-        };
-        
-        // Only include date parameters for date_range mode
-        if (mode === 'date_range') {
-          body.start_date = startDate || null;
-          body.end_date = endDate || null;
-        }
-      }
+    let params: Record<string, any> = {
+      auth_id: authId,
+      auth_info_2: email,
+      password,
+      count: parseInt(count.toString()),
+    };
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+    let endpoint = '';
+    if (mode === 'timeline') {
+      endpoint = `${API_URL}/X/timeline-stream`;
+      params['screen_name'] = screenName;
+    } else {
+      endpoint = `${API_URL}/X/search-stream`;
+      params['query'] = query;
+      params['mode'] = mode;
+      if (mode === 'date_range') {
+        params['start_date'] = startDate || null;
+        params['end_date'] = endDate || null;
       }
-      
-      const data: Tweet[] = await res.json();
-      setTweets(data);
-      showToast(`Successfully scraped ${data.length} tweets!`);
-    } catch (err) {
-      console.error(err);
-      setError('Failed to scrape tweets. Please check your credentials and try again.');
-      showToast('Failed to scrape tweets. Please check your credentials and try again.', 'error');
     }
 
-    setLoading(false);
+    const qs = new URLSearchParams(params as any).toString();
+    const es = new EventSource(`${endpoint}?${qs}`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (ev) => {
+      const data = JSON.parse(ev.data);
+      if (data.type === 'progress') {
+        const pct = (data.current / data.total) * 100;
+        setProgress(pct);
+      } else if (data.type === 'complete') {
+        setTweets(data.results);
+        showToast(`Successfully scraped ${data.results.length} tweets!`);
+        setLoading(false);
+        es.close();
+      }
+    };
+
+    es.onerror = () => {
+      setError('Failed to scrape tweets. Please check your credentials and try again.');
+      showToast('Failed to scrape tweets. Please check your credentials and try again.', 'error');
+      setLoading(false);
+      es.close();
+    };
   };
+
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+    };
+  }, []);
 
   const formatDate = (dateString: string): string => {
     try {
@@ -356,6 +366,11 @@ export default function TwitterPage() {
                   </>
                 )}
               </button>
+              {loading && (
+                <div className="mt-4">
+                  <ProgressBar progress={progress} label={`${Math.round(progress)}%`} />
+                </div>
+              )}
             </form>
 
             {error && (
