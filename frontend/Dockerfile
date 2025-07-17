@@ -1,21 +1,21 @@
-# 1. Base image
-FROM node:18-alpine
-
-# 2. Set workdir
+# frontend/Dockerfile
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# 3. Copy package.json & install deps
-COPY package.json package-lock.json ./
-RUN npm ci
+# รับค่า NEXT_PUBLIC_API_URL เป็น build-arg
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
-# 4. Copy source
+COPY package*.json ./
+RUN npm ci
 COPY . .
 
-# 5. Build Next.js
+# Build จะอ่าน NEXT_PUBLIC_API_URL จาก ENV ข้างบน
 RUN npm run build
 
-# 6. Expose port
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=builder /app/ ./
+ENV NODE_ENV=production
 EXPOSE 3000
-
-# 7. Start Next.js in production mode
 CMD ["npm", "run", "start"]

@@ -5,6 +5,8 @@ import SearchForm from '../components/SearchForm';
 import SearchResults from '../components/SearchResults';
 import { SearchFormData, SearchResponse, SearchResult, SearchInfo } from '../types';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const DuckDuckGoPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -21,7 +23,7 @@ const DuckDuckGoPage: React.FC = () => {
     setProgress(0);
 
     const params = new URLSearchParams(formData as any).toString();
-    const es = new EventSource(`http://127.0.0.1:8000/ddg/search-stream?${params}`);
+    const es = new EventSource(`${API_URL}/ddg/search-stream?${params}`);
     eventSourceRef.current = es;
 
     es.onmessage = (e) => {

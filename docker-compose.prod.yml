@@ -1,0 +1,20 @@
+version: "3.8"
+services:
+  backend:
+    image: topten10/unified-scraper-backend:latest
+    container_name: scraper-backend
+    environment:
+      - DOCKER_CONTAINER=true
+    env_file: ./backend/.env       # Contains UPSTASH_REDIS_REST_URL and TOKEN
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: topten10/unified-scraper-frontend:latest
+    container_name: scraper-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8000"  # Adjust to point to backend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
