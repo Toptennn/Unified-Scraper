@@ -34,9 +34,49 @@ class DuckDuckGoScraper:
         for option in config.CHROME_OPTIONS:
             chrome_options.add_argument(option)
         
-        # Force headless in cloud environments or when requested
-        if headless or os.getenv('STREAMLIT_SHARING') or os.getenv('STREAMLIT_CLOUD'):
+        # Force headless in Docker environments or when requested
+        if (headless or 
+            os.path.exists('/.dockerenv') or  # Docker detection
+            os.getenv('DOCKER_CONTAINER')):   # Docker environment variable
             chrome_options.add_argument('--headless=new')
+        
+        # Docker-specific Chrome options
+        if os.path.exists('/.dockerenv') or os.getenv('DOCKER_CONTAINER'):
+            docker_options = [
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
+                '--disable-features=TranslateUI,VizDisplayCompositor',
+                '--disable-ipc-flooding-protection',
+                '--disable-extensions',
+                '--disable-plugins',
+                '--disable-images',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--run-all-compositor-stages-before-draw',
+                '--disable-background-networking',
+                '--disable-background-timer-throttling',
+                '--disable-client-side-phishing-detection',
+                '--disable-default-apps',
+                '--disable-hang-monitor',
+                '--disable-popup-blocking',
+                '--disable-prompt-on-repost',
+                '--disable-sync',
+                '--enable-automation',
+                '--password-store=basic',
+                '--use-mock-keychain',
+                '--single-process',
+                '--disable-blink-features=AutomationControlled',
+                '--window-size=1920,1080',
+                '--start-maximized'
+            ]
+            for option in docker_options:
+                chrome_options.add_argument(option)
         
         # Performance-focused options
         performance_options = [
@@ -97,32 +137,25 @@ class DuckDuckGoScraper:
         
         for method_name, setup_func in setup_methods:
             try:
-                print(f"Attempting {method_name} setup...")
                 driver = setup_func(chrome_options)
                 if driver:
-                    print(f"✅ {method_name} setup successful")
                     break
             except Exception as e:
                 last_error = e
-                print(f"❌ {method_name} failed: {e}")
                 continue
         
         if not driver:
             raise RuntimeError(f"All Chrome setup methods failed. Last error: {last_error}")
         
-        # Set cloud-optimized timeouts
-        if os.getenv('STREAMLIT_SHARING') or os.getenv('STREAMLIT_CLOUD'):
-            driver.set_page_load_timeout(60)  # Increased for cloud
-            driver.implicitly_wait(10)  # Increased for cloud
-        else:
-            driver.set_page_load_timeout(20)
-            driver.implicitly_wait(5)
+        # Set timeouts
+        driver.set_page_load_timeout(20)
+        driver.implicitly_wait(5)
         
         # Apply stealth settings
         try:
             self._apply_stealth_settings(driver)
-        except Exception as e:
-            print(f"Warning: Could not apply stealth settings: {e}")
+        except Exception:
+            pass
         
         return driver
 
@@ -133,36 +166,50 @@ class DuckDuckGoScraper:
             driver_path = ChromeDriverManager().install()
             service = Service(driver_path)
             
-            # Add service arguments for better stability
-            service.creation_flags = 0x08000000  # CREATE_NO_WINDOW flag for Windows
+            # Docker environment service configuration
+            if os.path.exists('/.dockerenv') or os.getenv('DOCKER_CONTAINER'):
+                # Docker-specific service options
+                service.start_error_message = ""
+                service.log_file = "/dev/null"
+                # Don't set creation_flags in Linux containers
+            else:
+                # Add service arguments for better stability on Windows
+                service.creation_flags = 0x08000000  # CREATE_NO_WINDOW flag for Windows
             
             driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            # Test the driver with a simple command
+            driver.execute_script("return navigator.userAgent;")
             
             return driver
             
         except Exception as e:
-            print(f"WebDriver Manager failed: {e}")
-            raise
+            raise e
 
     def _setup_with_system_chrome(self, chrome_options):
         """Setup using system Chrome/Chromium."""
-        # Look for system Chrome/Chromium
-        chrome_paths = [
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser', 
-            '/usr/bin/google-chrome',
-            '/usr/bin/google-chrome-stable'
-        ]
+        # Check for Docker environment variables first
+        chrome_binary = (os.getenv('CHROME_BIN') or 
+                        os.getenv('GOOGLE_CHROME_BIN') or 
+                        os.getenv('CHROME_PATH') or 
+                        os.getenv('CHROMIUM_PATH'))
         
-        chrome_binary = None
-        for path in chrome_paths:
-            if os.path.exists(path):
-                chrome_binary = path
-                print(f"Found Chrome at: {path}")
-                break
+        # If no environment variable, look for system Chrome/Chromium
+        if not chrome_binary:
+            chrome_paths = [
+                '/usr/bin/google-chrome-stable',
+                '/usr/bin/google-chrome',
+                '/usr/bin/chromium',
+                '/usr/bin/chromium-browser'
+            ]
+            
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_binary = path
+                    break
         
         if not chrome_binary:
-            raise Exception("No system Chrome/Chromium found")
+            raise RuntimeError("No system Chrome/Chromium found")
         
         chrome_options.binary_location = chrome_binary
         
@@ -180,8 +227,7 @@ class DuckDuckGoScraper:
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                     driver.set_page_load_timeout(30)
                     return driver
-                except Exception as e:
-                    print(f"Failed with system driver {driver_path}: {e}")
+                except Exception:
                     continue
         
         # Fallback to webdriver-manager for system Chrome
@@ -239,8 +285,8 @@ class DuckDuckGoScraper:
         
         try:
             driver.execute_script(stealth_script)
-        except Exception as e:
-            print(f"Could not execute stealth script: {e}")
+        except Exception:
+            pass
 
     def _wait_for_results(self, driver) -> bool:
         """Wait for search results with enhanced selectors."""
@@ -257,14 +303,11 @@ class DuckDuckGoScraper:
                     elements = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector)))
                 
                 if elements:
-                    print(f"✅ Found {len(elements)} results with selector: {selector}")
                     return True
                     
             except TimeoutException:
-                print(f"⏰ Timeout waiting for selector: {selector}")
                 continue
-            except Exception as e:
-                print(f"❌ Error with selector {selector}: {e}")
+            except Exception:
                 continue
         
         return False
@@ -284,23 +327,16 @@ class DuckDuckGoScraper:
                 };
             """)
             
-            print(f"🔍 Debug Info:")
-            print(f"   Title: {page_info['title']}")
-            print(f"   URL: {page_url}")
-            print(f"   Content preview: {page_info['bodyText'][:100]}...")
-            
             # Check for blocking patterns
             blocking_keywords = ['blocked', 'captcha', 'verify', 'protection', 'cloudflare', 'access denied']
             if any(keyword in page_info['bodyText'].lower() for keyword in blocking_keywords):
-                raise RuntimeError(f"❌ Page blocked or CAPTCHA detected.")
+                raise RuntimeError("Page blocked or CAPTCHA detected.")
             
             # Verify we're on DuckDuckGo
             if "duckduckgo" not in page_info['title'].lower() and "duckduckgo" not in page_url.lower():
                 raise RuntimeError(f"❌ Wrong page loaded. Expected DuckDuckGo, got: {page_info['title']}")
             
             # Quick recovery attempt
-            print("🔄 Attempting page recovery...")
-            
             # Single scroll to trigger any lazy loading
             driver.execute_script("window.scrollTo(0, Math.min(500, document.body.scrollHeight));")
             
@@ -314,13 +350,11 @@ class DuckDuckGoScraper:
                 EC.presence_of_element_located((By.CSS_SELECTOR, "article, .result, [data-testid='result']"))
             )
             
-            print("✅ Page recovery successful")
             return True
             
         except TimeoutException:
             raise RuntimeError("❌ Could not find search results after recovery attempts")
         except Exception as e:
-            print(f"❌ Page handling error: {e}")
             raise
 
     def _click_more_results(self, driver, max_clicks: int, progress_callback=None) -> int:
@@ -328,8 +362,6 @@ class DuckDuckGoScraper:
         pages_retrieved = 1
         consecutive_failures = 0
         max_consecutive_failures = 3
-        
-        print(f"🔄 Attempting to load {max_clicks} pages (Cloud optimized)...")
         
         # Initial progress update
         if progress_callback:
@@ -339,7 +371,6 @@ class DuckDuckGoScraper:
             try:
                 # Stop if "No more results found for" appears anywhere on the page
                 if driver.execute_script("return document.body.innerText.includes('No more results found for');"):
-                    print("🛑 No more results found message detected.")
                     if progress_callback:
                         progress_callback(pages_retrieved, max_clicks, "🛑 No more results found, stopping pagination.")
                     break
@@ -348,9 +379,7 @@ class DuckDuckGoScraper:
                 if progress_callback:
                     progress_callback(pages_retrieved, max_clicks, f"Loading page {pages_retrieved + 1}...")
                 
-                # Longer wait for cloud environments
-                cloud_timeout = 30 if os.getenv('STREAMLIT_SHARING') or os.getenv('STREAMLIT_CLOUD') else 20
-                wait = WebDriverWait(driver, cloud_timeout)
+                wait = WebDriverWait(driver, 20)
                 
                 # Store initial result count
                 initial_results = len(driver.find_elements(By.CSS_SELECTOR, "article, .result, [data-testid='result']"))
@@ -359,7 +388,7 @@ class DuckDuckGoScraper:
                 if progress_callback:
                     progress_callback(pages_retrieved, max_clicks, f"Scrolling to find more results button...")
                 
-                # More conservative scrolling for cloud
+                # Scroll to bottom
                 driver.execute_script("""
                     window.scrollTo({
                         top: document.body.scrollHeight - window.innerHeight,
@@ -367,11 +396,11 @@ class DuckDuckGoScraper:
                     });
                 """)
                 
-                # Wait longer for page stabilization in cloud
-                time.sleep(0.5 if os.getenv('STREAMLIT_SHARING') or os.getenv('STREAMLIT_CLOUD') else 0.3)
+                # Wait for page stabilization
+                time.sleep(0.3)
                 
-                # Wait for document ready with longer timeout
-                WebDriverWait(driver, cloud_timeout).until(
+                # Wait for document ready
+                WebDriverWait(driver, 20).until(
                     lambda d: d.execute_script("return document.readyState") == "complete"
                 )
                 
@@ -406,22 +435,20 @@ class DuckDuckGoScraper:
                             if progress_callback:
                                 progress_callback(pages_retrieved, max_clicks, f"Waiting for new content to load...")
                             
-                            # Wait for new content with extended timeout for cloud
+                            # Wait for new content
                             try:
-                                WebDriverWait(driver, cloud_timeout * 2).until(
+                                WebDriverWait(driver, 40).until(
                                     lambda d: len(d.find_elements(By.CSS_SELECTOR, "article, .result, [data-testid='result']")) > initial_results
                                 )
                                 button_found = True
                                 pages_retrieved += 1
                                 consecutive_failures = 0  # Reset failure counter
-                                print(f"✅ Loaded page {pages_retrieved}")
                                 
                                 # Update progress - success
                                 if progress_callback:
                                     progress_callback(pages_retrieved, max_clicks, f"✅ Successfully loaded page {pages_retrieved}")
                                 break
                             except TimeoutException:
-                                print(f"⚠️ Timeout waiting for new content on page {i+2}")
                                 consecutive_failures += 1
                                 if progress_callback:
                                     progress_callback(pages_retrieved, max_clicks, f"⚠️ Timeout loading page {pages_retrieved + 1}")
@@ -429,37 +456,31 @@ class DuckDuckGoScraper:
                                 
                     except (NoSuchElementException, TimeoutException):
                         continue
-                    except Exception as e:
-                        print(f"⚠️ Error with selector {selector}: {e}")
+                    except Exception:
                         continue
                 
                 if not button_found:
                     consecutive_failures += 1
-                    print(f"🔚 No more results button found (attempt {consecutive_failures})")
                     if progress_callback:
                         progress_callback(pages_retrieved, max_clicks, f"🔚 No more results available (stopped at page {pages_retrieved})")
                     
                     # Exit early if too many consecutive failures
                     if consecutive_failures >= max_consecutive_failures:
-                        print(f"❌ Stopping after {consecutive_failures} consecutive failures")
                         if progress_callback:
                             progress_callback(pages_retrieved, max_clicks, f"❌ Stopped after {consecutive_failures} consecutive failures")
                         break
                         
             except Exception as e:
                 consecutive_failures += 1
-                print(f"❌ Error loading page {i+2}: {e}")
                 if progress_callback:
                     progress_callback(pages_retrieved, max_clicks, f"❌ Error loading page {i+2}: {str(e)[:50]}...")
                 
                 # Exit early if too many consecutive failures
                 if consecutive_failures >= max_consecutive_failures:
-                    print(f"❌ Stopping after {consecutive_failures} consecutive failures")
                     if progress_callback:
                         progress_callback(pages_retrieved, max_clicks, f"❌ Stopped after {consecutive_failures} consecutive failures")
                     break
         
-        print(f"📊 Successfully loaded {pages_retrieved} pages")
         if progress_callback:
             progress_callback(pages_retrieved, max_clicks, f"🎉 Completed! Loaded {pages_retrieved} pages total")
         
@@ -479,11 +500,9 @@ class DuckDuckGoScraper:
     def _extract_fallback_links(self, soup) -> list:
         """Enhanced fallback link extraction."""
         results = []
-        print("🔄 Using fallback link extraction...")
         
         # Find all links
         all_links = soup.find_all('a', href=True)
-        print(f"🔍 Found {len(all_links)} total links")
         
         for link in all_links:
             try:
@@ -504,7 +523,7 @@ class DuckDuckGoScraper:
                         parent = link.parent
                         if parent:
                             published_date = self._extract_published_date(parent)
-                    except:
+                    except Exception:
                         pass
                     
                     results.append({
@@ -513,17 +532,16 @@ class DuckDuckGoScraper:
                         "published_date": published_date
                     })
                     
-            except Exception as e:
+            except Exception:
                 continue
         
-        print(f"📊 Fallback extraction found {len(results)} results")
         return results
 
     def _extract_published_date(self, article):
         """Extract published date from article with English date handling."""
         try:
             # Debug: Print the article HTML to see what we're working with
-            # print(f"🔍 Article HTML snippet: {str(article)[:500]}...")
+            # Commented out for production
             
             date_span = None
             date_text = None
@@ -532,7 +550,6 @@ class DuckDuckGoScraper:
             date_span = article.select_one("span.MILR5XIVy9h75WrLvKiq.qsXMqKZNYEaWqGnWVdoa")
             if date_span:
                 date_text = date_span.get_text(strip=True)
-                print(f"✅ Found date with primary selector: '{date_text}'")
             
             if not date_span or not date_text:
                 # Enhanced fallback selectors - more comprehensive search
@@ -564,7 +581,6 @@ class DuckDuckGoScraper:
                         if date_span:
                             date_text = date_span.get_text(strip=True)
                             if date_text:
-                                print(f"✅ Found date with fallback selector '{selector}': '{date_text}'")
                                 break
                     except Exception as e:
                         # Continue to next selector if this one fails
@@ -582,12 +598,10 @@ class DuckDuckGoScraper:
                 matches = re.findall(english_date_pattern, article_text)
                 if matches:
                     date_text = matches[0].strip()
-                    print(f"✅ Found date with regex pattern: '{date_text}'")
                 
                 # Pattern for "Today"
                 elif 'Today' in article_text:
                     date_text = 'Today'
-                    print(f"✅ Found 'Today' in article text")
                 
                 # Pattern for "x days ago" or "x day ago"
                 else:
@@ -595,23 +609,15 @@ class DuckDuckGoScraper:
                     matches = re.findall(days_ago_pattern, article_text)
                     if matches:
                         date_text = matches[0].strip()
-                        print(f"✅ Found days ago pattern: '{date_text}'")
             
             if not date_text:
-                print("⚠️ No date found in article")
                 return None
             
             # Parse the found date text
             parsed_date = self._parse_english_date(date_text)
-            if parsed_date:
-                print(f"✅ Successfully parsed date: '{date_text}' -> '{parsed_date}'")
-            else:
-                print(f"⚠️ Failed to parse date: '{date_text}'")
-            
             return parsed_date
             
-        except Exception as e:
-            print(f"⚠️ Error extracting date: {e}")
+        except Exception:
             return None
 
     def _parse_english_date(self, date_text: str):
@@ -621,12 +627,10 @@ class DuckDuckGoScraper:
             
             # Clean up the date text
             date_text = date_text.strip()
-            print(f"🔍 Parsing date text: '{date_text}'")
             
             # Handle "Today"
             if "Today" in date_text or "today" in date_text:
                 result = current_date.date().isoformat()
-                print(f"✅ Parsed 'Today' as: {result}")
                 return result
             
             # Handle "x days ago" or "x day ago"
@@ -636,14 +640,12 @@ class DuckDuckGoScraper:
                 days_ago = int(match.group(1))
                 target_date = current_date - datetime.timedelta(days=days_ago)
                 result = target_date.date().isoformat()
-                print(f"✅ Parsed '{days_ago} days ago' as: {result}")
                 return result
             
             # Handle "Yesterday"
             if "Yesterday" in date_text or "yesterday" in date_text:
                 target_date = current_date - datetime.timedelta(days=1)
                 result = target_date.date().isoformat()
-                print(f"✅ Parsed 'Yesterday' as: {result}")
                 return result
             
             # Month name mapping (both abbreviated and full)
@@ -671,8 +673,6 @@ class DuckDuckGoScraper:
                 day = int(match.group(2))
                 year = int(match.group(3))
                 
-                print(f"🔍 Extracted: month='{month_name}', day={day}, year={year}")
-                
                 # Find month number
                 month_num = month_mapping.get(month_name)
                 
@@ -680,13 +680,9 @@ class DuckDuckGoScraper:
                     try:
                         parsed_date = datetime.date(year, month_num, day)
                         result = parsed_date.isoformat()
-                        print(f"✅ Successfully created date: {day}/{month_num}/{year} = {result}")
                         return result
-                    except ValueError as e:
-                        print(f"⚠️ Invalid date: {day}/{month_num}/{year} - {e}")
+                    except ValueError:
                         return None
-                else:
-                    print(f"⚠️ Could not match English month: '{month_name}'")
             
             # Try parsing other common date formats using strptime
             date_formats = [
@@ -704,17 +700,14 @@ class DuckDuckGoScraper:
                 try:
                     parsed_date = datetime.datetime.strptime(date_text, date_format).date()
                     result = parsed_date.isoformat()
-                    print(f"✅ Parsed with format '{date_format}': {result}")
                     return result
                 except ValueError:
                     continue
             
             # If no pattern matches, return None
-            print(f"⚠️ No matching pattern found for: '{date_text}'")
             return None
             
-        except Exception as e:
-            print(f"⚠️ Error parsing English date '{date_text}': {e}")
+        except Exception:
             return None
     
     def _parse_results(self, html: str) -> list:
@@ -722,26 +715,19 @@ class DuckDuckGoScraper:
         soup = BeautifulSoup(html, "html.parser")
         results = []
         
-        print("🔍 Parsing search results...")
-        
         # Try to find articles using each selector
         articles = []
-        successful_selector = None
         
         for selector in config.RESULT_SELECTORS:
             try:
                 found_articles = soup.select(selector)
                 if found_articles:
                     articles = found_articles
-                    successful_selector = selector
-                    print(f"✅ Found {len(articles)} articles using: {selector}")
                     break
-            except Exception as e:
-                print(f"❌ Selector failed {selector}: {e}")
+            except Exception:
                 continue
         
         if not articles:
-            print("⚠️ No articles found, trying fallback method...")
             return self._extract_fallback_links(soup)
         
         # Extract data from articles
@@ -769,11 +755,9 @@ class DuckDuckGoScraper:
                             "published_date": published_date
                         })
                         
-            except Exception as e:
-                print(f"⚠️ Error parsing article {i}: {e}")
+            except Exception:
                 continue
         
-        print(f"📊 Successfully parsed {len(results)} results")
         return results
 
     def scrape(self, query: str, max_pages: int, headless: bool = True, progress_callback=None, start_date=None, end_date=None) -> tuple[pd.DataFrame, int]:
@@ -792,9 +776,7 @@ class DuckDuckGoScraper:
             Tuple of (DataFrame with results, number of pages retrieved)
         """
         if not query.strip():
-            raise ValueError("❌ Query cannot be empty")
-        
-        print(f"🔍 Starting scrape for: '{query}' (max {max_pages} pages)")
+            raise ValueError("Query cannot be empty")
         
         if progress_callback:
             progress_callback(0, max_pages, "🚀 Starting browser...")
@@ -809,9 +791,7 @@ class DuckDuckGoScraper:
                 datetime.datetime.strptime(start_date, '%Y-%m-%d')
                 datetime.datetime.strptime(end_date, '%Y-%m-%d')
                 url += f"&df={start_date}..{end_date}&ia=web"
-                print(f"📅 Date range filter: {start_date} to {end_date}")
             except ValueError as e:
-                print(f"⚠️ Invalid date format: {e}. Expected YYYY-MM-DD")
                 raise ValueError("Date format must be YYYY-MM-DD")
         
         driver = None
@@ -822,14 +802,24 @@ class DuckDuckGoScraper:
                 progress_callback(0, max_pages, "🔧 Setting up Chrome driver...")
             
             driver = self._setup_driver(headless)
-            print("✅ Driver setup complete")
             
             # Navigate to DuckDuckGo
             if progress_callback:
                 progress_callback(0, max_pages, "🌐 Loading DuckDuckGo homepage...")
             
-            print("🌐 Loading DuckDuckGo homepage...")
-            driver.get("https://duckduckgo.com/")
+            # Retry logic for Chrome window issues
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    driver.get("https://duckduckgo.com/")
+                    break
+                except Exception:
+                    if attempt == max_retries - 1:
+                        driver.quit()
+                        driver = self._setup_driver(headless)
+                        driver.get("https://duckduckgo.com/")
+                    else:
+                        time.sleep(2)
             
             # Wait for search box
             if progress_callback:
@@ -837,28 +827,31 @@ class DuckDuckGoScraper:
             
             wait = WebDriverWait(driver, 15)
             wait.until(EC.presence_of_element_located((By.ID, "searchbox_input")))
-            print("✅ Homepage loaded")
             
             # Navigate to search results
             if progress_callback:
                 progress_callback(0, max_pages, f"🔍 Searching for: {query[:50]}...")
             
-            print(f"🔍 Searching for: {query}")
-            print(f"🔗 URL: {url}")
-            driver.get(url)
+            # Retry logic for search page navigation
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    driver.get(url)
+                    break
+                except Exception:
+                    if attempt == max_retries - 1:
+                        raise RuntimeError(f"Failed to load search page after {max_retries} attempts")
+                    else:
+                        time.sleep(2)
             
             # Wait for results with multiple fallbacks
             if progress_callback:
                 progress_callback(1, max_pages, "⏳ Loading initial search results...")
             
-            print("⏳ Waiting for search results...")
             if not self._wait_for_results(driver):
                 if progress_callback:
                     progress_callback(1, max_pages, "🔄 Recovery mode - reloading page...")
-                print("⚠️ Initial result loading failed, trying recovery...")
                 self._handle_page_not_loaded(driver)
-            
-            print("✅ Search results loaded")
             
             # Load additional pages
             if progress_callback:
@@ -870,11 +863,9 @@ class DuckDuckGoScraper:
             if progress_callback:
                 progress_callback(pages_retrieved, max_pages, "📄 Extracting and parsing results...")
             
-            print("📄 Extracting page content...")
             html = driver.page_source
             
         except Exception as e:
-            print(f"❌ Scraping error: {e}")
             if progress_callback:
                 progress_callback(0, max_pages, f"❌ Error: {str(e)[:50]}...")
             raise
@@ -882,16 +873,13 @@ class DuckDuckGoScraper:
             if driver:
                 try:
                     driver.quit()
-                    print("🔄 Browser closed")
-                except:
+                except Exception:
                     pass
         
         # Parse results
-        print("🔄 Parsing results...")
         results = self._parse_results(html)
         
         df = pd.DataFrame(results)
-        print(f"✅ Scraping complete: {len(df)} results from {pages_retrieved} pages")
         
         if progress_callback:
             progress_callback(pages_retrieved, max_pages, f"🎉 Complete! Found {len(df)} results from {pages_retrieved} pages")
