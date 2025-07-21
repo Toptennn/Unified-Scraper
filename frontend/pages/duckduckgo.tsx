@@ -5,7 +5,7 @@ import SearchForm from '../components/SearchForm';
 import SearchResults from '../components/SearchResults';
 import { SearchFormData, SearchResponse, SearchResult, SearchInfo } from '../types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 const DuckDuckGoPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);

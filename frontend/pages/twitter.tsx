@@ -6,7 +6,7 @@ import TweetTable from '../components/TweetTable';
 import ProgressBar from '../components/ProgressBar';
 import type { Tweet, Toast, TwitterSearchParams } from '../types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 export default function TwitterPage() {
   const [authId, setAuthId] = useState<string>('');
