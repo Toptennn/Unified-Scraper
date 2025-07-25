@@ -35,9 +35,9 @@ class RedisCookieManager:
 
         ttl_env = os.getenv("COOKIE_TTL_SECONDS")
         try:
-            self.ttl_seconds = int(ttl_env) if ttl_env else 60 * 60 * 24 * 30
+            self.ttl_seconds = int(ttl_env) if ttl_env else 60 * 60 * 24 * 7
         except ValueError:
-            self.ttl_seconds = 60 * 60 * 24 * 30
+            self.ttl_seconds = 60 * 60 * 24 * 7
 
     def _safe_id(self, auth_id: str) -> str:
         safe = "".join(c for c in auth_id if c.isalnum() or c in ("_", "-"))
