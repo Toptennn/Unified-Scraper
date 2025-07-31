@@ -289,8 +289,25 @@ class DuckDuckGoScraper:
             pass
 
     def _wait_for_results(self, driver) -> bool:
-        """Wait for search results with enhanced selectors."""
-        wait = WebDriverWait(driver, 15)  # Increased timeout
+        """Wait for search results with enhanced selectors and early no-results detection."""
+        # First, do a quick check for "no results" after page loads
+        try:
+            # Wait for page to be ready (short timeout)
+            WebDriverWait(driver, 5).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # Quick check for "no results" indicators
+            if self._quick_check_no_results(driver):
+                return False  # No results found quickly
+                
+        except TimeoutException:
+            pass  # Continue with normal result waiting
+        except Exception:
+            pass  # Continue with normal result waiting
+        
+        # Normal wait for results with longer timeout
+        wait = WebDriverWait(driver, 10)  # Reduced from 15 to 10 seconds
         
         # Try each selector with different strategies
         for selector in config.RESULT_SELECTORS:
@@ -311,6 +328,97 @@ class DuckDuckGoScraper:
                 continue
         
         return False
+
+    def _quick_check_no_results(self, driver) -> bool:
+        """Quick check for no results indicators without waiting long."""
+        try:
+            # Get page content quickly
+            page_info = driver.execute_script("""
+                return {
+                    title: document.title,
+                    bodyText: document.body ? document.body.innerText.toLowerCase() : '',
+                    url: window.location.href
+                };
+            """)
+            
+            # Check if we're on a valid DuckDuckGo page
+            if "duckduckgo" not in page_info['title'].lower() and "duckduckgo" not in page_info['url'].lower():
+                return False  # Not a DuckDuckGo page, this is a real error
+            
+            # Check for "no results" indicators in the page text
+            no_results_indicators = [
+                'no results found',
+                'no results for',
+                'no web results',
+                'your search did not match',
+                'try different keywords',
+                'no matches found',
+                'no results',
+                'did not match any documents',
+                'try using different keywords'
+            ]
+            
+            # If any no-results indicator is found, this is a legitimate "no results" case
+            if any(indicator in page_info['bodyText'] for indicator in no_results_indicators):
+                return True
+            
+            return False
+            
+        except Exception:
+            # If we can't determine, assume it's not a "no results" case
+            return False
+
+    def _check_for_no_results(self, driver) -> bool:
+        """Check if the page loaded successfully but shows no search results."""
+        try:
+            # Wait for page to be ready
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # Get page content
+            page_info = driver.execute_script("""
+                return {
+                    title: document.title,
+                    bodyText: document.body ? document.body.innerText.toLowerCase() : '',
+                    url: window.location.href
+                };
+            """)
+            
+            # Check if we're on a valid DuckDuckGo page
+            if "duckduckgo" not in page_info['title'].lower() and "duckduckgo" not in page_info['url'].lower():
+                return False  # Not a DuckDuckGo page, this is a real error
+            
+            # Check for "no results" indicators in the page text
+            no_results_indicators = [
+                'no results found',
+                'no results for',
+                'no web results',
+                'your search did not match',
+                'try different keywords',
+                'no matches found'
+            ]
+            
+            # If any no-results indicator is found, this is a legitimate "no results" case
+            if any(indicator in page_info['bodyText'] for indicator in no_results_indicators):
+                return True
+            
+            # Check if the page has the basic DuckDuckGo structure but no actual results
+            # Look for the search interface elements (which should be present) but no result articles
+            has_search_interface = driver.find_elements(By.CSS_SELECTOR, 
+                "input[name='q'], #searchbox_input, .search-form, [data-testid='searchbox']")
+            has_results = driver.find_elements(By.CSS_SELECTOR, 
+                "article, .result, [data-testid='result'], .web-result")
+            
+            # If we have search interface but no results, it's likely a "no results" case
+            if has_search_interface and not has_results:
+                return True
+                
+            return False
+            
+        except Exception:
+            # If we can't determine, assume it's not a "no results" case
+            return False
 
     def _handle_page_not_loaded(self, driver):
         """Optimized page loading error handling."""
@@ -369,10 +477,17 @@ class DuckDuckGoScraper:
         
         for i in range(max_clicks - 1):
             try:
-                # Stop if "No more results found for" appears anywhere on the page
-                if driver.execute_script("return document.body.innerText.includes('No more results found for');"):
+                # Quick check for no-results early in pagination
+                if self._quick_check_no_results(driver):
                     if progress_callback:
-                        progress_callback(pages_retrieved, max_clicks, "🛑 No more results found, stopping pagination.")
+                        progress_callback(pages_retrieved, max_clicks, "🛑 No results detected, stopping pagination.")
+                    break
+                
+                # Stop if "No more results found for" appears anywhere on the page
+                page_text = driver.execute_script("return document.body.innerText")
+                if "No more results found" in page_text or "No results found" in page_text:
+                    if progress_callback:
+                        progress_callback(pages_retrieved, max_clicks, "🛑 No results text found, stopping pagination.")
                     break
 
                 # Update progress at start of each page attempt
@@ -383,7 +498,12 @@ class DuckDuckGoScraper:
                 
                 # Store initial result count
                 initial_results = len(driver.find_elements(By.CSS_SELECTOR, "article, .result, [data-testid='result']"))
-                
+                if initial_results == 0 and pages_retrieved == 1:
+                    # Nothing found on the first page ➜ stop immediately
+                    if progress_callback:
+                        progress_callback(pages_retrieved, max_clicks, "🛑 No results on first page, stopping.")
+                    break
+
                 # Update progress - scrolling
                 if progress_callback:
                     progress_callback(pages_retrieved, max_clicks, f"Scrolling to find more results button...")
@@ -460,15 +580,9 @@ class DuckDuckGoScraper:
                         continue
                 
                 if not button_found:
-                    consecutive_failures += 1
                     if progress_callback:
-                        progress_callback(pages_retrieved, max_clicks, f"🔚 No more results available (stopped at page {pages_retrieved})")
-                    
-                    # Exit early if too many consecutive failures
-                    if consecutive_failures >= max_consecutive_failures:
-                        if progress_callback:
-                            progress_callback(pages_retrieved, max_clicks, f"❌ Stopped after {consecutive_failures} consecutive failures")
-                        break
+                        progress_callback(pages_retrieved, max_clicks, f"🔚 No 'More results' button found on page {pages_retrieved}")
+                    break
                         
             except Exception as e:
                 consecutive_failures += 1
@@ -849,9 +963,30 @@ class DuckDuckGoScraper:
                 progress_callback(1, max_pages, "⏳ Loading initial search results...")
             
             if not self._wait_for_results(driver):
-                if progress_callback:
-                    progress_callback(1, max_pages, "🔄 Recovery mode - reloading page...")
-                self._handle_page_not_loaded(driver)
+                # Check if this is a legitimate "no results" case
+                if self._check_for_no_results(driver):
+                    if progress_callback:
+                        progress_callback(1, max_pages, "ℹ️ No search results found for this query")
+                    # Get the current page HTML for any potential results parsing
+                    html = driver.page_source
+                    # Clean up driver before returning
+                    try:
+                        driver.quit()
+                        driver = None
+                    except Exception:
+                        pass
+                    
+                    # Parse results (will be empty or minimal)
+                    results = self._parse_results(html)
+                    df = pd.DataFrame(results)
+                    if progress_callback:
+                        progress_callback(1, max_pages, f"✅ Complete! Found {len(df)} results")
+                    return df, 1
+                else:
+                    # This is a real page loading error
+                    if progress_callback:
+                        progress_callback(1, max_pages, "🔄 Recovery mode - reloading page...")
+                    self._handle_page_not_loaded(driver)
             
             # Load additional pages
             if progress_callback:
